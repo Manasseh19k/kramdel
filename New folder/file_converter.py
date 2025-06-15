@@ -210,6 +210,72 @@ class FileConverter:
         
         return df
 
+    # ===== NEW METHOD ADDED HERE =====
+    @staticmethod
+    def parse_json_multiple_roots(json_path: Path, root_key: Optional[str] = None, 
+                                 compression: Optional[str] = None) -> List[Any]:
+        """
+        Parse JSON file that may contain multiple occurrences of the same root key
+        
+        Args:
+            json_path: Path to JSON file
+            root_key: The root key to extract (will get all occurrences)
+            compression: Compression type if any
+            
+        Returns:
+            List containing all data from the specified root key or all objects
+        """
+        all_data = []
+        
+        with FileConverter._get_file_handle(json_path, 'rb', compression) as f:
+            if root_key:
+                # Use ijson to find all occurrences of the root key
+                parser = ijson.kvitems(f, '')
+                
+                for key, value in parser:
+                    if key == root_key:
+                        if isinstance(value, list):
+                            all_data.extend(value)
+                        else:
+                            all_data.append(value)
+                
+                logger.info(f"Found {len(all_data)} records from root key '{root_key}'")
+            else:
+                # Try standard parsing first
+                f.seek(0)
+                try:
+                    content = f.read()
+                    if isinstance(content, bytes):
+                        content = content.decode('utf-8')
+                    data = json.loads(content)
+                    
+                    if isinstance(data, list):
+                        all_data = data
+                    else:
+                        all_data = [data]
+                except json.JSONDecodeError:
+                    # Parse multiple JSON objects
+                    f.seek(0)
+                    content = f.read()
+                    if isinstance(content, bytes):
+                        content = content.decode('utf-8')
+                    
+                    decoder = json.JSONDecoder()
+                    idx = 0
+                    
+                    while idx < len(content):
+                        content = content[idx:].lstrip()
+                        if not content:
+                            break
+                        try:
+                            obj, end_idx = decoder.raw_decode(content)
+                            all_data.append(obj)
+                            idx += end_idx
+                        except json.JSONDecodeError:
+                            break
+        
+        return all_data
+
     @staticmethod
     def json_to_csv_expanded(json_path: Union[str, Path], csv_path: Union[str, Path], array_columns: List[str], root_key: Optional[str]=None, max_rows: Optional[int]=None) -> None:
         """ Convert JSON to CSV with expanded arrays.
@@ -285,6 +351,7 @@ class FileConverter:
             logger.error(f"Error converting JSON to Excel with array expansions: {e}")
             raise
 
+    # ===== MODIFIED METHOD: Added handle_multiple_roots parameter =====
     @staticmethod
     def json_to_csv(json_path: Union[str, Path], 
                    csv_path: Union[str, Path],
@@ -298,7 +365,8 @@ class FileConverter:
                    schema: Optional[Dict] = None,
                    num_workers: int = 4,
                    chunk_size: int = 1000,
-                   show_progress: bool = True) -> None:
+                   show_progress: bool = True,
+                   handle_multiple_roots: bool = False) -> None:  # NEW PARAMETER ADDED
         """ Convert JSON to CSV with optional flattening and parallel processing.
         Args:
             json_path (Union[str, Path]): Path to the input JSON file.
@@ -314,10 +382,21 @@ class FileConverter:
             num_workers (int): Number of parallel workers for processing chunks.
             chunk_size (int): Size of each chunk for parallel processing.
             show_progress (bool): Whether to show progress bar during processing.
+            handle_multiple_roots (bool): Whether to handle multiple occurrences of the same root key.
         """
         
         json_path = Path(json_path)
         csv_path = Path(csv_path)
+
+        # ===== NEW CODE BLOCK: Check for multiple roots =====
+        if handle_multiple_roots and root_key:
+            logger.info(f"Using multiple root key handling for key: '{root_key}'")
+            return _stream_json_to_csv(
+                json_path, csv_path, root_key, max_rows,
+                flatten, sep, compression, column_map,
+                schema, show_progress
+            )
+        # ===== END OF NEW CODE BLOCK =====
 
         try:
             with FileConverter._get_file_handle(json_path, 'r', compression) as f:
@@ -373,6 +452,7 @@ class FileConverter:
                 schema, show_progress
             )
 
+    # ===== MODIFIED METHOD: Added handle_multiple_roots parameter =====
     @staticmethod
     def json_to_excel(json_path: Union[str, Path], excel_path: Union[str, Path],
                      root_key: Optional[str] = None,
@@ -383,7 +463,8 @@ class FileConverter:
                      compression: Optional[str] = None,
                      column_map: Optional[Dict[str, str]] = None,
                      schema: Optional[Dict] = None,
-                     show_progress: bool = True) -> None:
+                     show_progress: bool = True,
+                     handle_multiple_roots: bool = False) -> None:  # NEW PARAMETER ADDED
         """ Convert JSON to Excel with optional flattening and parallel processing.
         Args:
             json_path (Union[str, Path]): Path to the input JSON file.
@@ -397,9 +478,54 @@ class FileConverter:
             column_map (Optional[Dict[str, str]]): Mapping of old column names to new names.
             schema (Optional[Dict]): JSON schema for validation.
             show_progress (bool): Whether to show progress bar during processing.
+            handle_multiple_roots (bool): Whether to handle multiple occurrences of the same root key.
         """
         json_path = Path(json_path)
         excel_path = Path(excel_path)
+
+        # ===== NEW CODE BLOCK: Handle multiple roots =====
+        if handle_multiple_roots and root_key:
+            logger.info(f"Using multiple root key handling for key: '{root_key}'")
+            all_data = FileConverter.parse_json_multiple_roots(json_path, root_key, compression)
+            
+            if not all_data:
+                logger.warning(f"No data found for root key '{root_key}'")
+                pd.DataFrame().to_excel(excel_path, index=False)
+                return
+            
+            # Validate if schema provided
+            if schema:
+                for record in all_data:
+                    FileConverter._validate_data(record, schema)
+            
+            # Process the data
+            if flatten:
+                processed_data = []
+                for record in all_data:
+                    if isinstance(record, dict):
+                        flattened = FileConverter.flatten_json(record, sep=sep)
+                        processed_data.append(flattened)
+                    else:
+                        processed_data.append({'value': record})
+                all_data = processed_data
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(all_data)
+            
+            # Apply column mapping
+            if column_map:
+                df = FileConverter._map_columns(df, column_map)
+            
+            if max_rows:
+                df = df.head(max_rows)
+            
+            # Save to Excel
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            logger.info(f"Successfully saved {len(df)} rows to {excel_path}")
+            return
+        # ===== END OF NEW CODE BLOCK =====
 
         try:
             with FileConverter._get_file_handle(json_path, 'r', compression) as f:
@@ -442,6 +568,29 @@ class FileConverter:
                 max_rows, flatten, sep
             )
 
+    # ===== NEW METHOD ADDED HERE =====
+    @staticmethod
+    def diagnose_json_root_keys(json_path: Union[str, Path], compression: Optional[str] = None) -> Dict[str, int]:
+        """
+        Quick diagnostic to count root key occurrences
+        
+        Args:
+            json_path: Path to JSON file
+            compression: Compression type if any
+            
+        Returns:
+            Dictionary with root keys and their occurrence counts
+        """
+        json_path = Path(json_path)
+        key_counts = {}
+        
+        with FileConverter._get_file_handle(json_path, 'rb', compression) as f:
+            parser = ijson.kvitems(f, '')
+            
+            for key, value in parser:
+                key_counts[key] = key_counts.get(key, 0) + 1
+        
+        return key_counts
 
     @staticmethod
     def jsonlines_to_csv(jsonl_path: Union[str, Path], csv_path: Union[str, Path], max_rows: Optional[int]=None) -> None:
@@ -635,81 +784,7 @@ class FileConverter:
                     table_data.append(row_data)
         return headers, table_data
 
-# def _stream_json_to_csv(json_path: Path, csv_path: Path,
-#                         root_key: Optional[str] = None,
-#                         max_rows: Optional[int] = None,
-#                         flatten: bool = True,
-#                         sep: str = '_',
-#                         compression: Optional[str] = None,
-#                         column_map: Optional[Dict[str, str]] = None,
-#                         schema: Optional[Dict] = None,
-#                         show_progress: bool = True) -> None:
-#     """
-#     Stream large JSON files to CSV
-#     Args:
-#         json_path (Path): Path to the input JSON file.
-#         csv_path (Path): Path to the output CSV file.
-#         root_key (Optional[str]): Root key to extract data from if JSON is nested.
-#         max_rows (Optional[int]): Maximum number of rows to write to CSV.
-#         flatten (bool): Whether to flatten nested structures.
-#         sep (str): Separator for flattening keys.
-#         compression (Optional[str]): Compression type ('gzip', 'bz2', 'lzma', None).
-#         column_map (Optional[Dict[str, str]]): Mapping of old column names to new names.
-#         schema (Optional[Dict]): JSON schema for validation.
-#         show_progress (bool): Whether to show progress bar during processing.
-#     """
-#     with FileConverter._get_file_handle(json_path, 'rb', compression) as json_file:
-#         if root_key:
-#             parser = ijson.items(json_file, f'{root_key}.item')
-#         else:
-#             parser = ijson.items(json_file, 'item')
-
-#         first_row = True
-#         rows_written = 0
-#         all_headers = set()
-
-#         with open(csv_path, 'w', newline='', encoding='utf-8') as csv_file:
-#             writer = None
-#             batch = []
-#             batch_size = 1000
-
-#             for record in parser:
-#                 if max_rows and rows_written >= max_rows:
-#                     break
-
-#                 # Flatten the record if needed
-#                 if flatten and isinstance(record, dict):
-#                     record = FileConverter.flatten_json(record, sep=sep)
-#                 elif not isinstance(record, dict):
-#                     record = {'value': record}
-
-#                 batch.append(record)
-#                 all_headers.update(record.keys())
-
-#                 if len(batch) >= batch_size or (max_rows and rows_written + len(batch) >= max_rows):
-#                     # Write batch
-#                     if first_row:
-#                         headers = sorted(list(all_headers))
-#                         writer = csv.DictWriter(csv_file, fieldnames=headers, extrasaction='ignore')
-#                         writer.writeheader()
-#                         first_row = False
-
-#                     if writer:
-#                         for row in batch:
-#                             writer.writerow(row)
-#                             rows_written += 1
-
-#                     batch = []
-
-#             # Write remaining records
-#             if batch and writer:
-#                 for row in batch:
-#                     writer.writerow(row)
-#                     rows_written += 1
-
-#         logger.info(f"Streamed {rows_written} rows to {csv_path}")
-
-
+# The _stream_json_to_csv function remains the same as it already handles multiple roots
 def _stream_json_to_csv(json_path: Path, csv_path: Path,
                         root_key: Optional[str] = None,
                         max_rows: Optional[int] = None,
@@ -857,11 +932,13 @@ def _stream_json_to_excel(json_path: Path, excel_path: Path,
 
         logger.info(f"Streamed {len(df)} rows to {excel_path}")
 
+# ===== MODIFIED CONVENIENCE FUNCTION: Added handle_multiple_roots parameter =====
 def json_to_csv(json_path: Union[str, Path], csv_path: Union[str, Path], **kwargs) -> None:
     """Convert JSON to CSV. See FileConverter.json_to_csv for parameters."""
     converter = FileConverter()
     converter.json_to_csv(json_path, csv_path, **kwargs)
 
+# ===== MODIFIED CONVENIENCE FUNCTION: Added handle_multiple_roots parameter =====
 def json_to_excel(json_path: Union[str, Path], excel_path: Union[str, Path], **kwargs) -> None:
     """Convert JSON to Excel. See FileConverter.json_to_excel for parameters."""
     converter = FileConverter()
@@ -902,6 +979,17 @@ def extract_table_data_dynamic(section, ns, file_name_without_extension):
     converter = FileConverter()
     return converter.extract_table_data_dynamic(section, ns, file_name_without_extension)
 
+# ===== NEW CONVENIENCE FUNCTION ADDED =====
+def diagnose_json_root_keys(json_path: Union[str, Path], **kwargs) -> None:
+    """Print root key occurrences in a JSON file"""
+    counts = FileConverter.diagnose_json_root_keys(json_path, **kwargs)
+    print(f"\nRoot keys in {json_path}:")
+    for key, count in sorted(counts.items(), key=lambda x: x[1], reverse=True):
+        print(f"  '{key}': {count} occurrence(s)")
+
 
 if __name__ == "__main__":
-    print("File converter module ready for use.!")
+    print("File converter module ready for use!")
+    print("\nNew feature: Multiple root key support")
+    print("Use handle_multiple_roots=True parameter to extract ALL occurrences of a root key")
+    print("Example: json_to_csv('file.json', 'output.csv', root_key='data', handle_multiple_roots=True)")
