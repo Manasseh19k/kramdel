@@ -1509,4 +1509,295 @@ def json_to_excel(json_path: Union[str, Path], excel_path: Union[str, Path], **k
     converter = FileConverter()
     converter.json_to_excel(json_path, excel_path, **kwargs)
 
-def jsonlines_to_csv(
+# Continuation of module-level convenience functions
+
+def jsonlines_to_csv(jsonl_path: Union[str, Path], csv_path: Union[str, Path], **kwargs) -> None:
+    converter = FileConverter()
+    converter.jsonlines_to_csv(jsonl_path, csv_path, **kwargs)
+
+def xml_to_csv(xml_path: Union[str, Path], csv_path: Union[str, Path], **kwargs) -> None:
+    """Convert XML to CSV. See FileConverter.xml_to_csv for parameters."""
+    converter = FileConverter()
+    converter.xml_to_csv(xml_path, csv_path, **kwargs)
+
+def xml_to_excel(xml_path: Union[str, Path], excel_path: Union[str, Path], **kwargs) -> None:
+    """Convert XML to Excel. See FileConverter.xml_to_excel for parameters."""
+    converter = FileConverter()
+    converter.xml_to_excel(xml_path, excel_path, **kwargs)
+
+def json_to_csv_expanded(json_path: Union[str, Path], csv_path: Union[str, Path], array_columns: List[str], **kwargs) -> None:
+    """Convert JSON to CSV with expanded arrays. See FileConverter.json_to_csv_expanded for parameters."""
+    converter = FileConverter()
+    converter.json_to_csv_expanded(json_path, csv_path, array_columns, **kwargs)
+
+def json_to_excel_expanded(json_path: Union[str, Path], excel_path: Union[str, Path], array_columns: List[str], **kwargs) -> None:
+    """Convert JSON to Excel with expanded arrays. See FileConverter.json_to_excel_expanded for parameters."""
+    converter = FileConverter()
+    converter.json_to_excel_expanded(json_path, excel_path, array_columns, **kwargs)
+
+def stream_json_multi_keys_to_csv(json_path: Union[str, Path], csv_path: Union[str, Path], **kwargs) -> None:
+    """Stream large JSON files with multiple keys to CSV"""
+    converter = FileConverter()
+    converter.stream_json_multi_keys_to_csv(json_path, csv_path, **kwargs)
+
+def stream_json_multi_keys_to_excel(json_path: Union[str, Path], excel_path: Union[str, Path], **kwargs) -> None:
+    """Stream large JSON files with multiple keys to Excel"""
+    # Note: Excel streaming is limited by Excel's row limits
+    logger.warning("Excel has a limit of ~1 million rows per sheet")
+    converter = FileConverter()
+    # For now, we'll use the CSV streaming and convert
+    # This is a placeholder - you would implement proper Excel streaming
+    csv_temp = excel_path.with_suffix('.csv')
+    converter.stream_json_multi_keys_to_csv(json_path, csv_temp, **kwargs)
+    
+    # Convert CSV to Excel
+    df = pd.read_csv(csv_temp)
+    df.to_excel(excel_path, index=False)
+    csv_temp.unlink()  # Delete temp file
+
+def diagnose_json_root_keys(json_path: Union[str, Path], **kwargs) -> None:
+    """Print the root keys in a JSON file."""
+    counts = FileConverter.diagnose_json_root_keys(json_path, **kwargs)
+    print(f"\nRoot keys in {json_path}:")
+    for key, count in sorted(counts.items(), key=lambda x: x[1], reverse=True):
+        print(f"  {key}: {count} occurrences")
+
+def json_to_csv_multi_keys(json_path: Union[str, Path], csv_path: Union[str, Path], **kwargs) -> None:
+    """Convert JSON with multiple different root keys to CSV"""
+    converter = FileConverter()
+    converter.json_to_csv_multi_keys(json_path, csv_path, **kwargs)
+
+def json_to_excel_multi_keys(json_path: Union[str, Path], excel_path: Union[str, Path], **kwargs) -> None:
+    """Convert JSON with multiple different root keys to Excel"""
+    converter = FileConverter()
+    # For now, use CSV conversion then convert to Excel
+    # This is a simplified implementation
+    csv_temp = excel_path.with_suffix('.csv')
+    converter.json_to_csv_multi_keys(json_path, csv_temp, **kwargs)
+    
+    # Convert CSV to Excel
+    df = pd.read_csv(csv_temp)
+    df.to_excel(excel_path, index=False)
+    csv_temp.unlink()  # Delete temp file
+
+def analyze_json_structure(json_path: Union[str, Path], **kwargs) -> None:
+    """Analyze and print comprehensive JSON structure information"""
+    analysis = FileConverter.analyze_json_structure(json_path, **kwargs)
+    
+    print(f"\n{'='*60}")
+    print(f"JSON Structure Analysis: {analysis['file_path']}")
+    print(f"{'='*60}")
+    print(f"File size: {analysis['file_size']:,} bytes ({analysis['file_size_mb']:.2f} MB)")
+    print(f"Structure type: {analysis.get('structure_type', 'unknown')}")
+    print(f"Total unique root keys: {analysis['total_unique_keys']}")
+    print(f"Total records: {analysis.get('total_records', 'unknown')}")
+    
+    if analysis['root_keys']:
+        print(f"\nRoot Keys Detail:")
+        print(f"{'-'*60}")
+        
+        for key, info in analysis['root_keys'].items():
+            print(f"\n  Key: '{key}'")
+            print(f"    Occurrences: {info.get('count', info.get('occurrences', 0))}")
+    
+    if analysis['recommendations']:
+        print(f"\nRecommendations:")
+        print(f"{'-'*60}")
+        for rec in analysis['recommendations']:
+            print(f"  • {rec}")
+    
+    print(f"\n{'='*60}")
+
+# Enhanced streaming function for very large files
+def stream_json_ultra_low_memory(json_path: Union[str, Path], 
+                                csv_path: Union[str, Path],
+                                root_keys: Optional[Union[str, List[str]]] = None,
+                                **kwargs) -> None:
+    """
+    Ultra-low memory streaming for extremely large JSON files.
+    Uses minimal memory by processing one record at a time.
+    
+    Args:
+        json_path: Path to JSON file
+        csv_path: Path to output CSV
+        root_keys: Keys to extract
+        **kwargs: Additional arguments
+    """
+    logger.info(f"Starting ultra-low memory streaming of {json_path}")
+    
+    # Force low_memory mode
+    kwargs['low_memory'] = True
+    kwargs['batch_size'] = kwargs.get('batch_size', 50)  # Very small batch
+    
+    converter = FileConverter()
+    converter.stream_json_multi_keys_to_csv(json_path, csv_path, root_keys=root_keys, **kwargs)
+
+# Utility functions for file inspection
+def peek_json_file(json_path: Union[str, Path], lines: int = 10) -> None:
+    """
+    Peek at the first few lines of a JSON file to understand its structure
+    
+    Args:
+        json_path: Path to JSON file
+        lines: Number of lines to show
+    """
+    json_path = Path(json_path)
+    
+    print(f"\nPeeking at {json_path}")
+    print(f"File size: {json_path.stat().st_size / (1024*1024):.2f} MB")
+    print(f"\nFirst {lines} lines:")
+    print("-" * 60)
+    
+    with open(json_path, 'r', encoding='utf-8') as f:
+        for i, line in enumerate(f):
+            if i >= lines:
+                break
+            print(f"{i+1}: {line.rstrip()[:200]}")  # Show first 200 chars of each line
+            if len(line) > 200:
+                print("   ...")
+
+def estimate_processing_time(json_path: Union[str, Path]) -> None:
+    """
+    Estimate processing time based on file size
+    
+    Args:
+        json_path: Path to JSON file
+    """
+    json_path = Path(json_path)
+    size_mb = json_path.stat().st_size / (1024 * 1024)
+    
+    # Rough estimates based on typical processing speeds
+    if size_mb < 10:
+        estimate = "< 1 minute"
+    elif size_mb < 100:
+        estimate = "1-5 minutes"
+    elif size_mb < 500:
+        estimate = "5-20 minutes"
+    elif size_mb < 1000:
+        estimate = "20-40 minutes"
+    else:
+        estimate = f"{int(size_mb / 25)} minutes (approx)"
+    
+    print(f"\nFile size: {size_mb:.2f} MB")
+    print(f"Estimated processing time: {estimate}")
+    print("Note: Actual time depends on JSON structure complexity and system resources")
+
+# Main entry point for testing
+if __name__ == "__main__":
+    print("File converter module ready for use!")
+    print("\nAvailable functions:")
+    print("  - json_to_csv(): Convert JSON to CSV")
+    print("  - json_to_excel(): Convert JSON to Excel")
+    print("  - json_to_csv_multi_keys(): Handle multiple root keys")
+    print("  - stream_json_multi_keys_to_csv(): Stream large files")
+    print("  - stream_json_ultra_low_memory(): For extremely large files")
+    print("  - analyze_json_structure(): Analyze JSON file structure")
+    print("  - peek_json_file(): Preview JSON file content")
+    print("\nFor large files (>10MB), use streaming functions")
+    print("For very large files (>100MB), use ultra_low_memory functions")
+    
+    # Example usage
+    example = """
+    Example usage for large files:
+    
+    # 1. Analyze structure first
+    analyze_json_structure('large_file.json')
+    
+    # 2. Use appropriate streaming function
+    stream_json_ultra_low_memory(
+        'large_file.json',
+        'output.csv',
+        root_keys=['data'],  # Specify keys to extract
+        sep='__',
+        add_source_column=True,
+        batch_size=100  # Small batch for low memory
+    )
+    """
+    print(example)
+
+# Error recovery functions
+def recover_partial_csv(csv_path: Union[str, Path]) -> pd.DataFrame:
+    """
+    Attempt to recover data from a partially written CSV file
+    
+    Args:
+        csv_path: Path to partial CSV file
+        
+    Returns:
+        DataFrame with recovered data
+    """
+    csv_path = Path(csv_path)
+    
+    if not csv_path.exists():
+        logger.error(f"File {csv_path} does not exist")
+        return pd.DataFrame()
+    
+    try:
+        # Try to read what was written
+        df = pd.read_csv(csv_path, error_bad_lines=False, warn_bad_lines=True)
+        logger.info(f"Recovered {len(df)} rows from {csv_path}")
+        return df
+    except Exception as e:
+        logger.error(f"Could not recover data: {e}")
+        return pd.DataFrame()
+
+def validate_json_file(json_path: Union[str, Path]) -> bool:
+    """
+    Validate if a JSON file is properly formatted
+    
+    Args:
+        json_path: Path to JSON file
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    json_path = Path(json_path)
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            # Try to parse first 1MB
+            sample = f.read(1024 * 1024)
+            json.loads(sample)
+        logger.info(f"{json_path} appears to be valid JSON")
+        return True
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON validation failed: {e}")
+        logger.error(f"Error at line {e.lineno}, column {e.colno}")
+        return False
+    except Exception as e:
+        logger.error(f"Error validating JSON: {e}")
+        return False
+
+# Performance tips
+PERFORMANCE_TIPS = """
+Performance Tips for Large JSON Files:
+
+1. Install the fast C backend for ijson:
+   pip install ijson[yajl2_c]
+
+2. Use SSD storage for both input and output files
+
+3. Increase system memory if possible
+
+4. For extremely large files (>1GB):
+   - Use stream_json_ultra_low_memory()
+   - Set batch_size to 10-50
+   - Process overnight if needed
+
+5. Consider preprocessing with command-line tools:
+   - jq for filtering: jq '.data[]' input.json > filtered.json
+   - split for dividing: split -l 100000 input.json chunk_
+
+6. Monitor system resources:
+   - Use Task Manager (Windows) or top/htop (Linux/Mac)
+   - If memory usage is high, reduce batch_size
+
+7. For files that don't fit in memory:
+   - Process in chunks
+   - Use multiple passes if needed
+   - Consider a database for intermediate storage
+"""
+
+def print_performance_tips():
+    """Print performance optimization tips"""
+    print(PERFORMANCE_TIPS)
