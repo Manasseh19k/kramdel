@@ -146,21 +146,14 @@ def transform_to_database_format(input_file, output_file):
     
     return result_df
 
-def process_excel_to_csv(excel_file, output_csv):
-    """
-    Convert Excel file to CSV before processing.
-    """
-    df = pd.read_excel(excel_file)
-    df.to_csv(output_csv, index=False)
-    print(f"Converted {excel_file} to {output_csv}")
-    return output_csv
+
 
 def process_multiple_files(input_pattern, output_dir):
     """
-    Process multiple files matching a pattern.
+    Process multiple CSV files matching a pattern.
     
     Parameters:
-    - input_pattern: Glob pattern for input files (e.g., '*.csv' or '*.xlsx')
+    - input_pattern: Glob pattern for input files (e.g., '*.csv')
     - output_dir: Directory to save processed files
     """
     
@@ -184,35 +177,20 @@ def process_multiple_files(input_pattern, output_dir):
         
         print(f"\nProcessing: {input_file}")
         try:
-            # Check if it's an Excel file
-            if input_file.endswith('.xlsx') or input_file.endswith('.xls'):
-                # Convert to CSV first
-                temp_csv = os.path.join(output_dir, f"{name_without_ext}_temp.csv")
-                process_excel_to_csv(input_file, temp_csv)
-                input_file = temp_csv
-            
             # Transform to database format
             output_file = os.path.join(output_dir, f"{name_without_ext}_database_ready.csv")
             transform_to_database_format(input_file, output_file)
-            
-            # Remove temp file if created
-            if 'temp_csv' in locals() and os.path.exists(temp_csv):
-                os.remove(temp_csv)
                 
         except Exception as e:
             print(f"Error processing {input_file}: {str(e)}")
 
 # Example usage
 if __name__ == "__main__":
-    # Single file processing - Excel
-    # process_excel_to_csv('Book1.xlsx', 'book1_temp.csv')
-    # transform_to_database_format('book1_temp.csv', 'book1_database_ready.csv')
-    
-    # Single file processing - CSV
+    # Single file processing
     # transform_to_database_format('your_file.csv', 'your_file_database_ready.csv')
     
     # Multiple files processing
     process_multiple_files(
-        input_pattern='*.xlsx',  # Process all Excel files
+        input_pattern='*.csv',  # Process all CSV files in current directory
         output_dir='database_ready_files'
     )
