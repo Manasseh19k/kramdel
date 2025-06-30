@@ -139,10 +139,23 @@ def transform_to_database_format(input_file, output_file):
     negotiated_cols = required_columns[4:]  # All columns after the key columns
     result_df = result_df.dropna(subset=negotiated_cols, how='all')
     
+    # Drop rows that are missing NPI, TIN type, or TIN value
+    provider_required_cols = [
+        'negotiated_rates__0__provider_groups__0__npi',
+        'negotiated_rates__0__provider_groups__0__tin__type',
+        'negotiated_rates__0__provider_groups__0__tin__value'
+    ]
+    
+    rows_before_drop = len(result_df)
+    result_df = result_df.dropna(subset=provider_required_cols, how='any')
+    rows_dropped = rows_before_drop - len(result_df)
+    
     # Save to CSV
     result_df.to_csv(output_file, index=False)
     print(f"Transformed data saved to: {output_file}")
     print(f"Created {len(result_df)} rows from {len(df)} original rows")
+    if rows_dropped > 0:
+        print(f"Dropped {rows_dropped} rows missing provider information (NPI/TIN)")
     
     return result_df
 
