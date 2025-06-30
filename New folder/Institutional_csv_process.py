@@ -4,153 +4,164 @@ import glob
 import os
 import re
 
-def process_csv_with_institutional_split(input_file, output_file, column_keywords, 
-                                        maintain_columns, billing_code_col='billing_code'):
+def transform_to_database_format(input_file, output_file):
     """
-    Process a CSV file to create separate rows for each section ending with 'institutional' value.
+    Transform the JSON-extracted CSV into a normalized format suitable for RDBMS.
+    Each negotiated_rate group with each provider_group becomes a separate row.
     
     Parameters:
-    - input_file: Path to input CSV file
-    - output_file: Path to output CSV file
-    - column_keywords: List of keywords to look for in column names
-    - maintain_columns: List of column names to maintain in all rows
-    - billing_code_col: Name of the billing code column (default: 'billing_code')
+    - input_file: Path to input CSV file (like Book1.xlsx converted to CSV)
+    - output_file: Path to output CSV file (like organize_data.xlsx format)
     """
     
     # Read the CSV file
     df = pd.read_csv(input_file)
     
-    # Ensure billing code column exists
-    if billing_code_col not in df.columns:
-        raise ValueError(f"'{billing_code_col}' column not found in the CSV file")
+    # Key columns that are constant for each billing code
+    key_columns = ['name', 'billing_code_type', 'billing_code_type_version', 'billing_code']
     
-    # Ensure all maintain columns exist
-    valid_maintain_columns = []
-    for col in maintain_columns:
-        if col in df.columns:
-            valid_maintain_columns.append(col)
-        else:
-            print(f"Warning: '{col}' column not found in the CSV file")
+    # Verify key columns exist
+    for col in key_columns:
+        if col not in df.columns:
+            raise ValueError(f"Required column '{col}' not found in the input file")
     
-    # Ensure billing code is in maintain columns
-    if billing_code_col not in valid_maintain_columns:
-        valid_maintain_columns.insert(0, billing_code_col)
+    # Find all negotiated_rates groups
+    negotiated_rate_pattern = re.compile(r'negotiated_rates__(\d+)__')
+    negotiated_rate_indices = set()
     
-    print(f"Maintaining columns: {valid_maintain_columns}")
+    for col in df.columns:
+        match = negotiated_rate_pattern.search(col)
+        if match:
+            negotiated_rate_indices.add(int(match.group(1)))
     
-    # Create a list to store all output rows
-    all_output_rows = []
+    negotiated_rate_indices = sorted(negotiated_rate_indices)
+    print(f"Found {len(negotiated_rate_indices)} negotiated_rate groups")
     
-    # Process each row
+    # Create output rows
+    output_rows = []
+    
+    # Process each row in the input
     for idx, row in df.iterrows():
-        # Find all columns containing 'institutional' value (case-insensitive)
-        institutional_columns = []
-        for col_idx, (col_name, value) in enumerate(row.items()):
-            if pd.notna(value) and str(value).lower().strip() == 'institutional':
-                institutional_columns.append((col_idx, col_name))
+        # Get the key values for this row
+        key_values = {col: row[col] for col in key_columns}
         
-        if not institutional_columns:
-            # No institutional values - create a single row with all keyword-matching columns
-            output_row = {}
+        # Process each negotiated_rate group
+        for rate_idx in negotiated_rate_indices:
+            # Find all provider_groups within this negotiated_rate
+            provider_pattern = re.compile(f'negotiated_rates__{rate_idx}__provider_groups__(\d+)__')
+            provider_indices = set()
             
-            # Add maintain columns
-            for col in valid_maintain_columns:
-                output_row[col] = row[col]
-            
-            # Add keyword-matching columns
             for col in df.columns:
-                if col not in output_row and any(keyword.lower() in col.lower() for keyword in column_keywords):
-                    output_row[col] = row[col]
-            
-            output_row['row_type'] = 'standard'
-            all_output_rows.append(output_row)
-        else:
-            # Has institutional values - create separate rows for each section
-            columns_list = list(df.columns)
-            
-            # Identify sections based on negotiated_rates indices
-            sections = []
-            for col_idx, col_name in institutional_columns:
-                # Extract the negotiated_rates index from column name
-                match = re.search(r'negotiated_rates__(\d+)__', col_name)
+                match = provider_pattern.search(col)
                 if match:
-                    rate_index = int(match.group(1))
-                    
-                    # Find all columns for this negotiated_rate section
-                    section_columns = []
-                    pattern = f'negotiated_rates__{rate_index}__'
-                    
-                    for c in columns_list:
-                        if pattern in c:
-                            section_columns.append(c)
-                    
-                    if section_columns:
-                        sections.append({
-                            'index': rate_index,
-                            'columns': section_columns,
-                            'institutional_col': col_name
-                        })
+                    provider_indices.add(int(match.group(1)))
             
-            # Create a row for each section
-            for section_idx, section in enumerate(sections):
-                output_row = {}
+            provider_indices = sorted(provider_indices)
+            
+            # If no provider groups, check if there's still negotiated price data
+            if not provider_indices:
+                # Check if there's negotiated price data without provider groups
+                price_cols = [col for col in df.columns if f'negotiated_rates__{rate_idx}__negotiated_prices__0__' in col]
+                if price_cols:
+                    provider_indices = [0]  # Create a dummy provider group
+            
+            # For each provider group, create a row
+            for provider_idx in provider_indices:
+                # Skip if no data exists
+                npi_col = f'negotiated_rates__{rate_idx}__provider_groups__{provider_idx}__npi'
+                price_rate_col = f'negotiated_rates__{rate_idx}__negotiated_prices__0__negotiated_rate'
                 
-                # Add maintain columns
-                for col in valid_maintain_columns:
-                    output_row[col] = row[col]
+                # Check if this combination has actual data
+                has_provider_data = npi_col in df.columns and pd.notna(row.get(npi_col))
+                has_price_data = price_rate_col in df.columns and pd.notna(row.get(price_rate_col))
                 
-                # Add columns from this section that match keywords
-                for col in section['columns']:
-                    if any(keyword.lower() in col.lower() for keyword in column_keywords):
-                        output_row[col] = row[col]
+                if not has_provider_data and not has_price_data:
+                    continue
                 
-                # Ensure the institutional column is included
-                output_row[section['institutional_col']] = row[section['institutional_col']]
+                # Create output row
+                output_row = key_values.copy()
                 
-                output_row['row_type'] = f'institutional_{section["index"]}'
-                output_row['section_index'] = section['index']
+                # Map the columns with dynamic indices to fixed column names
+                column_mapping = {
+                    'negotiated_rates__0__provider_groups__0__npi': f'negotiated_rates__{rate_idx}__provider_groups__{provider_idx}__npi',
+                    'negotiated_rates__0__provider_groups__0__tin__type': f'negotiated_rates__{rate_idx}__provider_groups__{provider_idx}__tin__type',
+                    'negotiated_rates__0__provider_groups__0__tin__value': f'negotiated_rates__{rate_idx}__provider_groups__{provider_idx}__tin__value',
+                    'negotiated_rates__0__negotiated_prices__0__negotiated_type': f'negotiated_rates__{rate_idx}__negotiated_prices__0__negotiated_type',
+                    'negotiated_rates__0__negotiated_prices__0__negotiated_rate': f'negotiated_rates__{rate_idx}__negotiated_prices__0__negotiated_rate',
+                    'negotiated_rates__0__negotiated_prices__0__expiration_date': f'negotiated_rates__{rate_idx}__negotiated_prices__0__expiration_date',
+                    'negotiated_rates__0__negotiated_prices__0__service_code': f'negotiated_rates__{rate_idx}__negotiated_prices__0__service_code',
+                    'negotiated_rates__0__negotiated_prices__0__billing_class': f'negotiated_rates__{rate_idx}__negotiated_prices__0__billing_class',
+                    'negotiated_rates__1__negotiated_prices__0__billing_code_modifier': f'negotiated_rates__{rate_idx}__negotiated_prices__0__billing_code_modifier'
+                }
                 
-                all_output_rows.append(output_row)
+                # Add the mapped columns
+                for output_col, input_col in column_mapping.items():
+                    if input_col in df.columns:
+                        output_row[output_col] = row[input_col]
+                    else:
+                        output_row[output_col] = np.nan
+                
+                # Also check for billing_code_modifier in the current rate group
+                modifier_col = f'negotiated_rates__{rate_idx}__negotiated_prices__0__billing_code_modifier'
+                if modifier_col in df.columns:
+                    output_row['negotiated_rates__1__negotiated_prices__0__billing_code_modifier'] = row[modifier_col]
+                
+                output_rows.append(output_row)
     
     # Create output dataframe
-    result_df = pd.DataFrame(all_output_rows)
+    result_df = pd.DataFrame(output_rows)
     
-    # Reorder columns
-    cols_order = valid_maintain_columns + ['row_type', 'section_index']
-    other_cols = [col for col in result_df.columns if col not in cols_order]
+    # Ensure all required columns exist (add empty columns if missing)
+    required_columns = [
+        'name',
+        'billing_code_type',
+        'billing_code_type_version',
+        'billing_code',
+        'negotiated_rates__0__provider_groups__0__npi',
+        'negotiated_rates__0__provider_groups__0__tin__type',
+        'negotiated_rates__0__provider_groups__0__tin__value',
+        'negotiated_rates__0__negotiated_prices__0__negotiated_type',
+        'negotiated_rates__0__negotiated_prices__0__negotiated_rate',
+        'negotiated_rates__0__negotiated_prices__0__expiration_date',
+        'negotiated_rates__0__negotiated_prices__0__service_code',
+        'negotiated_rates__0__negotiated_prices__0__billing_class',
+        'negotiated_rates__1__negotiated_prices__0__billing_code_modifier'
+    ]
     
-    # Sort other columns to keep negotiated_rates sections together
-    def sort_key(col):
-        match = re.search(r'negotiated_rates__(\d+)__', col)
-        if match:
-            return (int(match.group(1)), col)
-        return (999, col)
+    for col in required_columns:
+        if col not in result_df.columns:
+            result_df[col] = np.nan
     
-    other_cols_sorted = sorted(other_cols, key=sort_key)
-    final_col_order = cols_order + other_cols_sorted
+    # Reorder columns to match desired output
+    result_df = result_df[required_columns]
     
-    # Only include columns that exist in the result
-    final_col_order = [col for col in final_col_order if col in result_df.columns]
-    result_df = result_df[final_col_order]
+    # Remove rows where all negotiated data is empty
+    negotiated_cols = required_columns[4:]  # All columns after the key columns
+    result_df = result_df.dropna(subset=negotiated_cols, how='all')
     
     # Save to CSV
     result_df.to_csv(output_file, index=False)
-    print(f"Processed data saved to: {output_file}")
+    print(f"Transformed data saved to: {output_file}")
     print(f"Created {len(result_df)} rows from {len(df)} original rows")
     
     return result_df
 
-def process_multiple_csv_files(input_pattern, output_dir, column_keywords, 
-                              maintain_columns, billing_code_col='billing_code'):
+def process_excel_to_csv(excel_file, output_csv):
     """
-    Process multiple CSV files matching a pattern.
+    Convert Excel file to CSV before processing.
+    """
+    df = pd.read_excel(excel_file)
+    df.to_csv(output_csv, index=False)
+    print(f"Converted {excel_file} to {output_csv}")
+    return output_csv
+
+def process_multiple_files(input_pattern, output_dir):
+    """
+    Process multiple files matching a pattern.
     
     Parameters:
-    - input_pattern: Glob pattern for input files (e.g., '*.csv')
+    - input_pattern: Glob pattern for input files (e.g., '*.csv' or '*.xlsx')
     - output_dir: Directory to save processed files
-    - column_keywords: List of keywords to look for in column names
-    - maintain_columns: List of column names to maintain in all rows
-    - billing_code_col: Name of the billing code column
     """
     
     # Create output directory if it doesn't exist
@@ -170,66 +181,38 @@ def process_multiple_csv_files(input_pattern, output_dir, column_keywords,
         # Generate output filename
         base_name = os.path.basename(input_file)
         name_without_ext = os.path.splitext(base_name)[0]
-        output_file = os.path.join(output_dir, f"{name_without_ext}_processed.csv")
         
         print(f"\nProcessing: {input_file}")
         try:
-            process_csv_with_institutional_split(
-                input_file, 
-                output_file, 
-                column_keywords, 
-                maintain_columns,
-                billing_code_col
-            )
+            # Check if it's an Excel file
+            if input_file.endswith('.xlsx') or input_file.endswith('.xls'):
+                # Convert to CSV first
+                temp_csv = os.path.join(output_dir, f"{name_without_ext}_temp.csv")
+                process_excel_to_csv(input_file, temp_csv)
+                input_file = temp_csv
+            
+            # Transform to database format
+            output_file = os.path.join(output_dir, f"{name_without_ext}_database_ready.csv")
+            transform_to_database_format(input_file, output_file)
+            
+            # Remove temp file if created
+            if 'temp_csv' in locals() and os.path.exists(temp_csv):
+                os.remove(temp_csv)
+                
         except Exception as e:
             print(f"Error processing {input_file}: {str(e)}")
 
 # Example usage
 if __name__ == "__main__":
-    # Define the keywords you want to look for in column names
-    # Based on your data structure, these capture the key pricing/negotiation fields
-    column_keywords = [
-        'negotiated_rate',
-        'negotiated_type',
-        'negotiated_price',
-        'billing_class',
-        'service_code',
-        'expiration_date',
-        'provider_groups',
-        'npi',
-        'tin',
-        'additional_information'
-    ]
+    # Single file processing - Excel
+    # process_excel_to_csv('Book1.xlsx', 'book1_temp.csv')
+    # transform_to_database_format('book1_temp.csv', 'book1_database_ready.csv')
     
-    # Define columns to maintain in all rows
-    # These are the base columns that should appear in every output row
-    maintain_columns = [
-        'billing_code',
-        'reporting_entity_name',
-        'reporting_entity_type',
-        'name',
-        'description',
-        'billing_code_type',
-        'billing_code_type_version',
-        'negotiation_arrangement',
-        'last_updated_on',
-        'version'
-    ]
-    
-    # Single file processing example
-    # process_csv_with_institutional_split(
-    #     input_file='your_file.csv',
-    #     output_file='your_file_processed.csv',
-    #     column_keywords=column_keywords,
-    #     maintain_columns=maintain_columns,
-    #     billing_code_col='billing_code'
-    # )
+    # Single file processing - CSV
+    # transform_to_database_format('your_file.csv', 'your_file_database_ready.csv')
     
     # Multiple files processing
-    process_multiple_csv_files(
-        input_pattern='*.csv',  # Process all CSV files in current directory
-        output_dir='processed_files',
-        column_keywords=column_keywords,
-        maintain_columns=maintain_columns,
-        billing_code_col='billing_code'  # Note: lowercase based on your data
+    process_multiple_files(
+        input_pattern='*.xlsx',  # Process all Excel files
+        output_dir='database_ready_files'
     )
