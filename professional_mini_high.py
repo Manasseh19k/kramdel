@@ -34,6 +34,14 @@ for _, row in df.iterrows():
             "negotiated_rate": fields.get("negotiated_rate"),
             "negotiated_type": fields.get("negotiated_type"),
             "service_code": fields.get("service_code"),
+
+
+                # ► NEW FIELDS YOU WANT:
+            "new_field_1":             fields.get("new_field_1"),
+            "another_field":           fields.get("another_field"),
+            # …and so on…
+
+            
         })
         records.append(rec)
 
