@@ -1,0 +1,53 @@
+2025-07-17 08:36:03,537 - INFO - query: [COPY  INTO '@~/member_enrollment_prod_only_20250717_082319.csv' FROM ( SELECT  *...]
+2025-07-17 08:36:03,590 - INFO - query execution done
+2025-07-17 08:36:03,592 - ERROR - Error writing to stage: (1304): 01bdbff0-0001-e851-0000-9e5d03d9469a: 001006 (22023): 01bdbff0-0001-e851-0000-9e5d03d9469a: SQL compilation error:
+invalid parameter 'HEADER'
+2025-07-17 08:36:03,595 - INFO - query: [CREATE  TEMP STAGE /* Python:snowflake.connector.pandas_tools.write_pandas() */ ...]
+2025-07-17 08:36:03,730 - INFO - query execution done
+2025-07-17 08:36:03,854 - INFO - query: [CREATE  TEMP FILE FORMAT "BCBSND_CONFORMED_DEV"."OUTBOUND"."SNOWPARK_TEMP_FILE_F...]
+2025-07-17 08:36:03,960 - INFO - query execution done
+2025-07-17 08:36:03,961 - INFO - query: [SELECT COLUMN_NAME, TYPE FROM table(infer_schema(location=>'@"BCBSND_CONFORMED_D...]
+2025-07-17 08:36:04,140 - INFO - query execution done
+2025-07-17 08:36:04,140 - INFO - query: [CREATE  TEMPORARY TABLE IF NOT EXISTS "BCBSND_CONFORMED_DEV"."OUTBOUND"."SNOWPAR...]
+2025-07-17 08:36:04,360 - INFO - query execution done
+2025-07-17 08:36:04,360 - INFO - query: [COPY INTO "BCBSND_CONFORMED_DEV"."OUTBOUND"."SNOWPARK_TEMP_TABLE_3CTBHBXSLW" /* ...]
+2025-07-17 08:36:04,801 - INFO - query execution done
+2025-07-17 08:36:04,803 - INFO - query: [COPY  INTO '@~/member_enrollment_validation_summary_20250717_082319.csv' FROM ( ...]
+2025-07-17 08:36:04,874 - INFO - query execution done
+2025-07-17 08:36:04,876 - ERROR - Error writing to stage: (1304): 01bdbff0-0001-e851-0000-9e5d03d946b2: 001006 (22023): 01bdbff0-0001-e851-0000-9e5d03d946b2: SQL compilation error:
+invalid parameter 'HEADER'
+================================================================================
+DEV vs PROD MEMBER ENROLLMENT VALIDATION REPORT
+================================================================================
+Timestamp: 20250717_082319
+Validation Status: FAILED
+
+Table Information:
+  DEV Table: BCBSND_CONFORMED_DEV.OUTBOUND.MEMBER_ENROLLMENT_MASTER
+    - Row Count: 1,866,551
+  PROD Table: BCBSND_CONFORMED_DEV.OUTBOUND.MEMBER_ENROLLMENT_MASTER_PROD
+    - Row Count: 2,045,680
+Validation Results:
+  Data Mismatches: 20,346,590
+  Rows only in DEV: 2,794
+  Rows only in PROD: 40,360
+  Total Issues Found: 20,389,744
+Created Snowflake Tables:
+  mismatches: MEMBER_ENROLLMENT_MISMATCHES_20250717_082319
+  dev_only: MEMBER_ENROLLMENT_DEV_ONLY_20250717_082319
+  prod_only: MEMBER_ENROLLMENT_PROD_ONLY_20250717_082319
+Local CSV Files:
+  mismatches: member_enrollment_mismatches_20250717_082319.csv
+  dev_only: member_enrollment_dev_only_20250717_082319.csv
+  prod_only: member_enrollment_prod_only_20250717_082319.csv
+  summary: member_enrollment_validation_summary_20250717_082319.csv
+Snowflake Stage Files:
+  mismatches: @~/member_enrollment_mismatches_20250717_082319.csv
+  dev_only: @~/member_enrollment_dev_only_20250717_082319.csv
+  prod_only: @~/member_enrollment_prod_only_20250717_082319.csv
+  summary: @~/member_enrollment_validation_summary_20250717_082319.csv
+Comparison Details:
+  Comparison Columns: MEMBER_ID, UMI_ID, GROUP_NUMBER, ELIGIBILITY_START_DATE
+  Common Columns Count: 77
+  Validation Date: 2025-07-17 08:34:33
+2025-07-17 08:36:07,900 - WARNING - Closing a session in a stored procedure is a no-op.
